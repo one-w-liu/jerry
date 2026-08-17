@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>刘浩宇 · 3D 投篮互动（放大/音效/慢动作）</title>
+  <meta name="description" content="交互式个人站：3D 篮球可拖拽投篮（three.js），点击放大为全屏，含音效与慢动作回放" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Xing+Kai:wght@400;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+
+  <style>
+    :root{
+      --bg-0:#030206; --bg-1:#10021a; --violet:#6f2fa0; --gold:#caa34a; --muted:rgba(230,238,243,0.75);
+    }
+    html,body{height:100%;margin:0;font-family:"Xing Kai","STXingkai","KaiTi",serif;background:linear-gradient(180deg,var(--bg-0),var(--bg-1));color:#FFF;overflow:hidden}
+    #bgCanvas{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+    .topbar{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:60;display:flex;gap:10px}
+    .nav-btn{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted);padding:8px 12px;border-radius:999px;cursor:pointer}
+
+    .page{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:48px;z-index:10;transition:opacity .5s,transform .5s}
+    .page.hidden{opacity:0;pointer-events:none;transform:scale(.98) translateY(10px)}
+    .panel{width:100%;max-width:1200px;padding:36px;border-radius:14px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);box-shadow:0 30px 100px rgba(0,0,0,0.6);backdrop-filter:blur(6px)}
+    .hero-title{font-family:"Xing Kai";font-size:clamp(4rem,10vw,8rem);line-height:0.84;margin:0;color:#fff7e6;text-align:center;text-shadow:0 18px 60px rgba(0,0,0,0.7)}
+    .hero-en{font-family:"Playfair Display",serif;font-size:clamp(1.0rem,2.2vw,1.9rem);color:var(--muted);text-align:center;margin-top:8px}
+
+    .controls{margin-top:20px;display:flex;justify-content:center;gap:12px}
+    .btn{padding:12px 24px;border-radius:999px;border:none;cursor:pointer;font-weight:700}
+    .btn-enter{background:linear-gradient(90deg,rgba(111,47,160,0.12),rgba(202,163,74,0.06));color:var(--gold)}
+    .hint{margin-top:14px;color:var(--muted);text-align:center}
+
+    /* three.js container */
+    #threeContainer{position:fixed;right:28px;bottom:28px;width:360px;height:360px;z-index:90;border-radius:18px;pointer-events:none;transition:all 420ms cubic-bezier(.2,.9,.2,1)}
+    #threeContainer.full { left:0; top:0; right:0; bottom:0; width:100%; height:100%; border-radius:0; padding:0; }
+    #threeCanvas{width:100%;height:100%;display:block;border-radius:inherit;box-shadow:0 18px 60px rgba(0,0,0,0.6);pointer-events:auto}
+
+    /* HUD */
+    #scoreBadge{position:fixed;right:34px;bottom:410px;color:var(--gold);font-weight:800;z-index:91;text-shadow:0 6px 18px rgba(0,0,0,0.5)}
+    .effectLayer{position:fixed;inset:0;z-index:92;pointer-events:none}
+
+    /* full-screen overlay for controls when expanded */
+    .overlayUI{position:fixed;right:28px;bottom:410px;z-index:95;color:var(--gold);font-weight:700;transition:opacity .3s}
+    .overlayUI.hidden{opacity:0;pointer-events:none}
+
+    /* particle */
+    .particle{position:fixed;pointer-events:none;border-radius:50%;z-index:93}
+
+    /* focus */
+    button:focus,*[tabindex]:focus{outline:3px solid rgba(111,47,160,0.14);outline-offset:6px;border-radius:8px}
+
+    @media (max-width:700px){
+      #threeContainer{right:12px;bottom:12px;width:260px;height:260px}
+      .hero-title{font-size:clamp(2.6rem,12vw,4.6rem)}
+    }
+  </style>
+</head>
+<body>
+  <canvas id="bgCanvas" aria-hidden="true"></canvas>
+
+  <div class="topbar" role="navigation" aria-label="导航">
+    <button class="nav-btn" data-target="start">Start</button>
+    <button class="nav-btn" data-target="about">About</button>
+    <button class="nav-btn" data-target="projects">Projects</button>
+    <button class="nav-btn" data-target="contact">Contact</button>
+  </div>
+
+  <section id="start" class="page">
+    <div class="panel">
+      <h1 class="hero-title">刘浩宇</h1>
+      <div class="hero-en">Liu Haoyu — 前锋 · 济南外国语学校（国际部）</div>
+      <div class="line" style="width:220px;height:4px;margin:18px auto;background:linear-gradient(90deg,transparent,var(--violet),var(--gold),transparent);border-radius:6px"></div>
+
+      <div class="controls">
+        <button id="enter" class="btn btn-enter">进入 · Enter</button>
+      </div>
+      <p class="hint">点击右下 3D 篮球可放大为全屏，按住拖拽并释放即可投篮；命中会慢动作回放并计分。</p>
+    </div>
+  </section>
+
+  <section id="about" class="page hidden">
+    <div class="panel">
+      <h2 style="font-size:2.6rem;margin:0 0 12px 0">关于我</h2>
+      <p style="color:var(--muted);font-size:1.05rem">我叫刘浩宇，祖籍山东青岛平度，出生 2009-09-08，现就读于济南外国语学校（国际部），高二。球场位置：前锋。</p>
+    </div>
+  </section>
+
+  <section id="projects" class="page hidden">
+    <div class="panel">
+      <h2 style="font-size:2.6rem;margin:0 0 12px 0">作品 / 活动</h2>
+      <p style="color:var(--muted)">示例：校级篮球比赛、训练营。把你的真实资料发我我会替换为你的时间线与图片。</p>
+    </div>
+  </section>
+
+  <section id="contact" class="page hidden">
+    <div class="panel">
+      <h2 style="font-size:2.6rem;margin:0 0 12px 0">联系</h2>
+      <p style="color:var(--muted)">邮箱：<a href="mailto:17615861657@163.com" style="color:var(--gold)">17615861657@163.com</a> · 电话：<a href="tel:17615861657" style="color:var(--gold)">17615861657</a></p>
+    </div>
+  </section>
+
+  <!-- three.js container（可放大为全屏） -->
+  <div id="threeContainer" aria-hidden="false" title="3D 篮球交互区域">
+    <canvas id="threeCanvas"></canvas>
+  </div>
+
+  <div id="scoreBadge">Score: 0</div>
+  <div id="effects" class="effectLayer" aria-hidden="true"></div>
+  <div id="audioState" class="overlayUI hidden">音效：已激活</div>
+
+<script>
+/* ---------- 配置 ---------- */
+const CONFIG = {
+  gravity: -9.8,
+  timeScale: 1.0,
+  throwScale: 0.035,
+  ballRadius: 0.25,
+  rimRadius: 0.65,
+  rimPosition: new THREE.Vector3(0, 2.5, -6.5),
+  restitution: 0.45,
+  airDrag: 0.995,
+  idleAmplitude: { x: 0.35, y: 0.25, z: 0.45 },
+  idleFreq: { x: 0.6, y: 0.9, z: 0.45 },
+  slowMoScale: 0.18,
+  slowMoDuration: 820
+};
+
+/* ---------- 全局变量 ---------- */
+let renderer, scene, camera, clock;
+let ballMesh, rimMesh, boardMesh;
+let ballState = {
+  position: new THREE.Vector3(0.8, 1.0, -2.0),
+  velocity: new THREE.Vector3(),
+  isHeld: false,
+  lastPositions: [],
+  idle: true,
+  idleCenter: new THREE.Vector3(0.8,1.0,-2.0),
+  idleSeed: Math.random()*1000,
+  scored: false
+};
+let score = 0;
+let lastTime = performance.now();
+let audioCtx = null;
+let audioEnabled = false;
+
+/* ---------- 初始化 three.js 场景 ---------- */
+function initThree() {
+  const canvas = document.getElementById('threeCanvas');
+  renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+  renderer.shadowMap.enabled = true;
+
+  scene = new THREE.Scene();
+  clock = new THREE.Clock();
+
+  camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+  camera.position.set(0, 1.8, 2.6);
+  camera.lookAt(0,1.6,-3);
+
+  const hemi = new THREE.HemisphereLight(0x8a7cb3, 0x080620, 0.7);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(5, 10, 5);
+  dir.castShadow = true;
+  dir.shadow.mapSize.set(1024,1024);
+  scene.add(dir);
+
+  // invisible ground for shadows
+  const groundMat = new THREE.ShadowMaterial({ opacity: 0.2 });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), groundMat);
+  ground.rotation.x = -Math.PI/2; ground.position.y = 0; ground.receiveShadow = true; ground.visible=false;
+  scene.add(ground);
+
+  // rim + backboard
+  const rimGeo = new THREE.TorusGeometry(CONFIG.rimRadius, 0.05, 16, 48);
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0xc97e2f, metalness: 0.6, roughness: 0.4, emissive: 0x110000 });
+  rimMesh = new THREE.Mesh(rimGeo, rimMat);
+  rimMesh.position.copy(CONFIG.rimPosition);
+  rimMesh.rotation.x = Math.PI/2;
+  rimMesh.castShadow = true;
+  scene.add(rimMesh);
+
+  const boardGeo = new THREE.BoxGeometry(1.2, 0.7, 0.06);
+  const boardMat = new THREE.MeshStandardMaterial({ color: 0xf3f3f3, metalness: 0.1, roughness: 0.6 });
+  boardMesh = new THREE.Mesh(boardGeo, boardMat);
+  boardMesh.position.set(CONFIG.rimPosition.x, CONFIG.rimPosition.y + 0.25, CONFIG.rimPosition.z - 0.35);
+  scene.add(boardMesh);
+
+  // ball
+  const ballGeo = new THREE.SphereGeometry(CONFIG.ballRadius, 32, 32);
+  const ballMat = new THREE.MeshStandardMaterial({ color: 0xff9f4a, metalness: 0.1, roughness: 0.6 });
+  ballMesh = new THREE.Mesh(ballGeo, ballMat);
+  ballMesh.castShadow = true;
+  ballMesh.position.copy(ballState.position);
+  scene.add(ballMesh);
+
+  // subtle rim light
+  const rimLight = new THREE.PointLight(0xffd7a8, 0.4, 6);
+  rimLight.position.copy(CONFIG.rimPosition).add(new THREE.Vector3(0,0.6,0));
+  scene.add(rimLight);
+
+  window.addEventListener('resize', onWindowResize);
+  onWindowResize();
+  renderer.setAnimationLoop(render);
+}
+
+/* ---------- 渲染与物理 ---------- */
+let lastZ = null;
+function render() {
+  const now = performance.now();
+  const dt = Math.min((now - lastTime)/1000 * CONFIG.timeScale, 0.05);
+  lastTime = now;
+
+  // idle漂浮（当速度小且不被拿起）
+  const speed = ballState.velocity.length();
+  if (!ballState.isHeld && speed < 0.08) {
+    if (!ballState.idle) {
+      ballState.idle = true;
+      ballState.idleCenter.copy(ballState.position);
+      ballState.idleSeed = Math.random()*1000;
+    }
+    const t = performance.now()/1000 + ballState.idleSeed;
+    const ox = Math.sin(t * CONFIG.idleFreq.x + ballState.idleSeed) * CONFIG.idleAmplitude.x;
+    const oy = Math.cos(t * CONFIG.idleFreq.y + ballState.idleSeed*1.3) * CONFIG.idleAmplitude.y + 0.12;
+    const oz = Math.sin(t * CONFIG.idleFreq.z + ballState.idleSeed*0.7) * CONFIG.idleAmplitude.z;
+    const target = new THREE.Vector3().copy(ballState.idleCenter).add(new THREE.Vector3(ox, oy, oz));
+    ballState.position.lerp(target, Math.min(1, dt*1.6));
+    ballMesh.rotation.x += 0.008; ballMesh.rotation.y += 0.01;
+    ballMesh.position.copy(ballState.position);
+    ballState.velocity.multiplyScalar(0.98);
+  } else {
+    ballState.idle = false;
+    if (!ballState.isHeld) {
+      ballState.velocity.y += CONFIG.gravity * dt;
+      ballState.velocity.multiplyScalar(Math.pow(CONFIG.airDrag, dt*60));
+      ballState.position.addScaledVector(ballState.velocity, dt);
+      if (ballState.position.y - CONFIG.ballRadius < 0) {
+        ballState.position.y = CONFIG.ballRadius;
+        if (ballState.velocity.y < 0) {
+          ballState.velocity.y = -ballState.velocity.y * CONFIG.restitution;
+          ballState.velocity.x *= 0.86; ballState.velocity.z *= 0.86;
+        }
+      }
+      ballMesh.position.copy(ballState.position);
+      const rotSpeed = ballState.velocity.length() * 0.6;
+      ballMesh.rotation.x += rotSpeed * dt;
+      ballMesh.rotation.y += rotSpeed * dt * 0.6;
+    }
+  }
+
+  // rim wobble subtle restore (damp)
+  rimMesh.rotation.z *= 0.995;
+
+  // scoring detection
+  checkScore();
+
+  renderer.render(scene, camera);
+}
+
+/* ---------- 进球判定与效果 ---------- */
+function checkScore(){
+  const hoopZ = CONFIG.rimPosition.z;
+  const prevZ = lastZ === null ? ballState.position.z : lastZ;
+  const curZ = ballState.position.z;
+  lastZ = curZ;
+
+  if (prevZ > hoopZ && curZ <= hoopZ && ballState.velocity.z < 0) {
+    const dx = ballState.position.x - CONFIG.rimPosition.x;
+    const dy = ballState.position.y - CONFIG.rimPosition.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < (CONFIG.rimRadius - CONFIG.ballRadius*0.6)) {
+      if (!ballState.scored) {
+        doScoreEffects();
+        ballState.scored = true;
+      }
+    } else {
+      if (Math.abs(dist - CONFIG.rimRadius) < 0.28) rimWobble(dist);
+    }
+  }
+  if (Math.abs(curZ - CONFIG.rimPosition.z) > 1.5) ballState.scored = false;
+}
+
+function doScoreEffects(){
+  score += 1;
+  document.getElementById('scoreBadge').textContent = 'Score: ' + score;
+  rimMesh.rotation.z += (Math.random() - 0.5) * 0.6;
+  const fx = document.createElement('div');
+  const rimScreen = toScreenPosition(CONFIG.rimPosition, camera, renderer.domElement);
+  fx.style.position='fixed'; fx.style.left=(rimScreen.x - 90)+'px'; fx.style.top=(rimScreen.y - 90)+'px';
+  fx.style.width='180px'; fx.style.height='180px'; fx.style.borderRadius='50%';
+  fx.style.background='radial-gradient(circle, rgba(202,163,74,0.32), rgba(139,79,208,0.06))';
+  fx.style.zIndex=220; fx.style.pointerEvents='none'; fx.style.opacity='0'; fx.style.filter='blur(6px)';
+  document.getElementById('effects').appendChild(fx);
+  requestAnimationFrame(()=>{ fx.style.transition='all 420ms ease-out'; fx.style.opacity='1'; fx.style.transform='scale(1)'; });
+  setTimeout(()=>{ fx.style.opacity='0'; fx.remove(); }, 600);
+  spawnParticlesAt(rimScreen.x, rimScreen.y, 18);
+  slowMotionPulse(CONFIG.slowMoScale, CONFIG.slowMoDuration);
+  playScoreSound();
+}
+
+function rimWobble(dist){
+  const force = (CONFIG.rimRadius - dist) * 2.5;
+  rimMesh.rotation.z += (Math.random() - 0.5) * 0.6 * Math.max(0.6, force);
+}
+
+function spawnParticlesAt(x,y,n){
+  for (let i=0;i<n;i++){
+    const p = document.createElement('div'); p.className='particle';
+    const size = 6 + Math.random()*10; p.style.width = p.style.height = size + 'px';
+    p.style.left = (x - size/2) + 'px'; p.style.top = (y - size/2) + 'px';
+    p.style.background = `hsl(${30 + Math.random()*40},80%,${50 + Math.random()*10}%)`;
+    document.getElementById('effects').appendChild(p);
+    const angle = Math.random()*Math.PI*2, speed = 40 + Math.random()*160;
+    let life=0;
+    const id = setInterval(()=> {
+      life += 16; const t=life/800;
+      p.style.left = (x + Math.cos(angle)*speed * t * 0.6) + 'px';
+      p.style.top = (y + Math.sin(angle)*speed * t * 0.6) + 'px';
+      p.style.opacity = String(Math.max(0,1 - t*1.6));
+      if (t > 1.1){ clearInterval(id); p.remove(); }
+    },16);
+  }
+}
+
+function slowMotionPulse(scale, duration){
+  const prev = CONFIG.timeScale;
+  CONFIG.timeScale = scale;
+  const origPos = camera.position.clone();
+  camera.position.z -= 0.6;
+  setTimeout(()=>{ CONFIG.timeScale = prev; camera.position.copy(origPos); }, duration);
+}
+
+function toScreenPosition(pos, camera, canvas) {
+  const vector = pos.clone().project(camera);
+  const rect = canvas.getBoundingClientRect();
+  const widthHalf = rect.width / 2;
+  const heightHalf = rect.height / 2;
+  return { x: ( vector.x * widthHalf ) + widthHalf + rect.left, y: ( -vector.y * heightHalf ) + heightHalf + rect.top };
+}
+
+/* ---------- pointer interaction ---------- */
+(function setupPointer(){
+  const dom = document.getElementById('threeCanvas');
+  const rect = () => dom.getBoundingClientRect();
+  let dragging = false, dragPlane = new THREE.Plane(), offset = new THREE.Vector3();
+  let lastPointerPositions = [];
+
+  function getPointer(e){
+    const r = rect();
+    return { x: ((e.clientX - r.left)/r.width)*2 - 1, y: -((e.clientY - r.top)/r.height)*2 + 1, clientX:e.clientX, clientY:e.clientY };
+  }
+
+  function onDown(e){
+    if (!audioEnabled) initAudio();
+    const p = getPointer(e);
+    pointer.set(p.x, p.y);
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(ballMesh, false);
+    if (hits.length > 0) {
+      dragging = true; ballState.isHeld = true; ballState.velocity.set(0,0,0);
+      dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).clone().negate(), hits[0].point);
+      offset.copy(hits[0].point).sub(ballMesh.position);
+      lastPointerPositions = [{ pos: hits[0].point.clone(), t: performance.now() }];
+      ballState.idle = false;
+      toggleExpand(true);
+      if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    }
+  }
+
+  function onMove(e){
+    if (!dragging) return;
+    const p = getPointer(e);
+    pointer.set(p.x, p.y);
+    raycaster.setFromCamera(pointer, camera);
+    const intersect = new THREE.Vector3();
+    raycaster.ray.intersectPlane(dragPlane, intersect);
+    if (intersect) {
+      const newPos = intersect.clone().sub(offset);
+      newPos.x = THREE.MathUtils.clamp(newPos.x, -3, 3);
+      newPos.y = THREE.MathUtils.clamp(newPos.y, 0.3, 4.0);
+      newPos.z = THREE.MathUtils.clamp(newPos.z, -10, 1);
+      ballState.position.copy(newPos);
+      ballMesh.position.copy(ballState.position);
+      lastPointerPositions.push({ pos: ballState.position.clone(), t: performance.now() });
+      if (lastPointerPositions.length > 10) lastPointerPositions.shift();
+    }
+  }
+
+  function onUp(e){
+    if (!dragging) return;
+    dragging = false; ballState.isHeld = false;
+    if (lastPointerPositions.length >= 2) {
+      const last = lastPointerPositions[lastPointerPositions.length - 1];
+      let earlier = lastPointerPositions[0];
+      for (let i = lastPointerPositions.length - 2; i >= 0; i--) {
+        if (last.t - lastPointerPositions[i].t > 60) { earlier = lastPointerPositions[i]; break; }
+      }
+      const dt = Math.max((last.t - earlier.t)/1000, 0.001);
+      const v = last.pos.clone().sub(earlier.pos).divideScalar(dt).multiplyScalar(CONFIG.throwScale);
+      if (v.length() < 0.2) v.z = -1.2;
+      ballState.velocity.copy(v);
+    }
+    lastPointerPositions = [];
+    setTimeout(()=> {
+      if (!ballState.isHeld && ballState.velocity.length() < 0.08) {
+        ballState.idleCenter.copy(ballState.position); ballState.idle = true; ballState.idleSeed = Math.random()*1000;
+      }
+    }, 400);
+    if (e.target.releasePointerCapture) try { e.target.releasePointerCapture(e.pointerId); } catch(e){}
+    playThrowSound();
+  }
+
+  const domCanvas = document.getElementById('threeCanvas');
+  domCanvas.addEventListener('pointerdown', onDown);
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+})();
+
+/* ---------- three init & UI ---------- */
+initThree();
+const threeContainer = document.getElementById('threeContainer');
+let isExpanded = false;
+function toggleExpand(forceOpen){
+  const target = (typeof forceOpen === 'boolean') ? forceOpen : !isExpanded;
+  if (target === isExpanded) return;
+  isExpanded = target;
+  if (isExpanded) {
+    threeContainer.classList.add('full');
+    threeContainer.style.left = '0'; threeContainer.style.top = '0'; threeContainer.style.right='0'; threeContainer.style.bottom='0';
+    threeContainer.style.width='100%'; threeContainer.style.height='100%'; threeContainer.style.borderRadius='0';
+    setTimeout(()=> onWindowResize(), 220);
+    document.getElementById('audioState').classList.remove('hidden');
+  } else {
+    threeContainer.classList.remove('full');
+    threeContainer.style.width='360px'; threeContainer.style.height='360px'; threeContainer.style.right='28px'; threeContainer.style.bottom='28px';
+    setTimeout(()=> onWindowResize(), 220);
+    document.getElementById('audioState').classList.add('hidden');
+  }
+}
+threeContainer.addEventListener('click', (e)=>{ if (ballState.isHeld) return; toggleExpand(); });
+window.addEventListener('keydown', (e)=> { if (e.key === 'Escape') toggleExpand(false); });
+
+(function simpleNav(){ const btns = document.querySelectorAll('.nav-btn'); const pages = document.querySelectorAll('.page');
+  function show(id){ pages.forEach(p=> p.id===id? p.classList.remove('hidden') : p.classList.add('hidden')); btns.forEach(b=> b.classList.toggle('active', b.dataset.target === id)); }
+  btns.forEach(b=> b.addEventListener('click', ()=> show(b.dataset.target))); document.getElementById('enter').addEventListener('click', ()=> show('about'));
+})();
+
+/* ---------- WebAudio ---------- */
+function initAudio(){ try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioEnabled = true; document.getElementById('audioState').classList.remove('hidden'); const osc = audioCtx.createOscillator(); const g = audioCtx.createGain(); osc.connect(g); g.connect(audioCtx.destination); g.gain.value = 0; osc.start(0); osc.stop(audioCtx.currentTime + 0.01); } catch(e) { audioEnabled = false; console.warn('Audio init failed', e); } }
+function playThrowSound(){ if (!audioEnabled) return; const ctx = audioCtx; const now = ctx.currentTime; const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'sawtooth'; o.frequency.setValueAtTime(260, now); g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.06, now + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, now + 0.22); o.connect(g); g.connect(ctx.destination); o.start(now); o.stop(now + 0.25); }
+function playScoreSound(){ if (!audioEnabled) return; const ctx = audioCtx; const now = ctx.currentTime; const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(); const g = ctx.createGain(); o1.type='sine'; o2.type='sine'; o1.frequency.setValueAtTime(880, now); o2.frequency.setValueAtTime(660, now); g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.12, now+0.01); g.gain.exponentialRampToValueAtTime(0.0001, now+0.6); o1.connect(g); o2.connect(g); g.connect(ctx.destination); o1.start(now); o2.start(now); o1.stop(now+0.6); o2.stop(now+0.6); }
+
+/* ---------- particle helper ---------- */
+function spawnParticlesAt(x,y,n){ for (let i=0;i<n;i++){ const p = document.createElement('div'); p.className='particle'; const size = 6 + Math.random()*10; p.style.width = p.style.height = size + 'px'; p.style.left = (x - size/2) + 'px'; p.style.top = (y - size/2) + 'px'; p.style.background = `hsl(${30 + Math.random()*40},80%,${50 + Math.random()*10}%)`; document.getElementById('effects').appendChild(p); const angle = Math.random()*Math.PI*2, speed = 40 + Math.random()*160; let life=0; const id = setInterval(()=> { life += 16; const t=life/800; p.style.left = (x + Math.cos(angle)*speed * t * 0.6) + 'px'; p.style.top = (y + Math.sin(angle)*speed * t * 0.6) + 'px'; p.style.opacity = String(Math.max(0,1 - t*1.6)); if (t > 1.1){ clearInterval(id); p.remove(); } },16); } }
+
+console.log('交互式 3D 投篮页面已加载。首次交互会激活音频（如果允许）。');
+</script>
+</body>
+</html>`;
+  const blob = new Blob([content], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'liu_haoyu_site.html'; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
+})();
+```
+
+方法 B：我也可以直接把文件提交到你指定的 GitHub 仓库（one-w-liu/jerry）。要我现在把文件推到该仓库的默认分支（创建或覆盖 index.html）吗？如果是，请确认：我可以把文件添加为 `index.html` 在仓库根目录并提交，提交信息我会写为 "Add interactive 3D site (index.html)"。
+
+请选择：
+- 运行上面的控制台脚本下载到本地（方法 A，推荐），或
+- 请我把文件推送到 one-w-liu/jerry 的默认分支（回复 “推送到 repo”）
